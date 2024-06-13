@@ -1,15 +1,8 @@
-# Import the dependencies.
-%matplotlib inline
-from matplotlib import style
-style.use('fivethirtyeight')
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import datetime as dt
-import sqlalchemy
+from flask import Flask, jsonify
+from sqlalchemy import create_engine, func
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, func
+import datetime as dt
 
 #################################################
 # Database Setup
@@ -27,52 +20,109 @@ Station = Base.classes.station
 # Create a session
 session = Session(engine)
 
-# View all of the classes that automap found
-print(Base.classes.keys())
-
-most_recent = session.query(Measurement.date).order_by(Measurement.date.desc()).first()[0]
-print(f"Most recent date: {most_recent}")
-
-
-# Calculate the date 12 months ago from the most recent date
-most_recent_date = dt.datetime.strptime(most_recent, "%Y-%m-%d")
-one_year_ago = most_recent_date - dt.timedelta(days=365)
-
-# Query for the last 12 months of precipitation data
-precipitation_data = session.query(Measurement.date, Measurement.prcp).filter(Measurement.date >= one_year_ago).all()
-
-# Load the query results into a DataFrame
-precip_df = pd.DataFrame(precipitation_data, columns=['date', 'prcp'])
-
-
-# Plot the results
-precip_df.plot(x='date', y='prcp', rot=45)
-plt.xlabel('Date')
-plt.ylabel('Precipitation')
-plt.title('Precipitation Over Last 12 Months')
-plt.show()
-
-# Print summary statistics
-print(precip_df.describe())
-
-# Query to find the most active stations
-active_stations = session.query(Measurement.station, func.count(Measurement.station)).group_by(Measurement.station).order_by(func.count(Measurement.station).desc()).all()
-print(active_stations)
-
-# Most active station
-most_active_station = active_stations[0][0]
-print(f"Most active station: {most_active_station}")
-
-# Close Session
-session.close()
 
 #################################################
 # Flask Setup
 #################################################
+# Flask setup
+app = Flask(__name__)
 
+
+def get_session():
+    session = Session(engine)
+    return session
+
+# Home route
+@app.route("/")
+def home():
+    return (
+        f"Welcome to the Climate API!<br/>"
+        f"Available Routes:<br/>"
+        f"/api/v1.0/precipitation<br/>"
+        f"/api/v1.0/stations<br/>"
+        f"/api/v1.0/tobs<br/>"
+        f"/api/v1.0/<start><br/>"
+        f"/api/v1.0/<start>/<end><br/>"
+    )
+
+# Precipitation route
+@app.route("/api/v1.0/precipitation")
+def precipitation():
+    session = get_session()
+    most_recent_date = session.query(Measurement.date).order_by(Measurement.date.desc()).first()[0]
+    most_recent_date = dt.datetime.strptime(most_recent_date, "%Y-%m-%d")
+    one_year_ago = most_recent_date - dt.timedelta(days=365)
+
+    results = session.query(Measurement.date, Measurement.prcp).filter(Measurement.date >= one_year_ago).all()
+    session.close()
+
+    precip_data = {date: prcp for date, prcp in results}
+    return jsonify(precip_data)
+
+# Stations route
+@app.route("/api/v1.0/stations")
+def stations():
+    session = get_session()
+    results = session.query(Station.station).all()
+    session.close()
+
+    stations = [result[0] for result in results]
+    return jsonify(stations)
+
+# TOBS route
+@app.route("/api/v1.0/tobs")
+def tobs():
+    session = get_session()
+    most_active_station = session.query(Measurement.station, func.count(Measurement.station)).group_by(Measurement.station).order_by(func.count(Measurement.station).desc()).first()[0]
+    most_recent_date = session.query(Measurement.date).order_by(Measurement.date.desc()).first()[0]
+    most_recent_date = dt.datetime.strptime(most_recent_date, "%Y-%m-%d")
+    one_year_ago = most_recent_date - dt.timedelta(days=365)
+
+    results = session.query(Measurement.date, Measurement.tobs).filter(Measurement.station == most_active_station).filter(Measurement.date >= one_year_ago).all()
+    session.close()
+
+    tobs_data = {date: tobs for date, tobs in results}
+    return jsonify(tobs_data)
+
+# Start date route
+@app.route("/api/v1.0/<start>")
+def start(start):
+    session = get_session()
+    start_date = dt.datetime.strptime(start, "%Y-%m-%d")
+    
+    results = session.query(
+        func.min(Measurement.tobs),
+        func.avg(Measurement.tobs),
+        func.max(Measurement.tobs)
+    ).filter(Measurement.date >= start_date).all()
+    session.close()
+    
+    temps = list(np.ravel(results))
+    return jsonify(temps)
+
+# Start-end date route
+@app.route("/api/v1.0/<start>/<end>")
+def start_end(start, end):
+    session = get_session()
+    start_date = dt.datetime.strptime(start, "%Y-%m-%d")
+    end_date = dt.datetime.strptime(end, "%Y-%m-%d")
+    
+    results = session.query(
+        func.min(Measurement.tobs),
+        func.avg(Measurement.tobs),
+        func.max(Measurement.tobs)
+    ).filter(Measurement.date >= start_date).filter(Measurement.date <= end_date).all()
+    session.close()
+    
+    temps = list(np.ravel(results))
+    return jsonify(temps)
 
 
 
 #################################################
 # Flask Routes
 #################################################
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
