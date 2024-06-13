@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
 import datetime as dt
+import numpy as np  
 
 #################################################
 # Database Setup
@@ -24,7 +25,6 @@ session = Session(engine)
 #################################################
 # Flask Setup
 #################################################
-# Flask setup
 app = Flask(__name__)
 
 
@@ -117,12 +117,8 @@ def start_end(start, end):
     temps = list(np.ravel(results))
     return jsonify(temps)
 
-
-
 #################################################
 # Flask Routes
 #################################################
-
-
 if __name__ == "__main__":
     app.run(debug=True)
